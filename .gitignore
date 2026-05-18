@@ -1,0 +1,19 @@
+# Dependências
+node_modules/
+**/node_modules/
+
+# Build do frontend
+frontend/dist/
+
+# Ambiente
+.env
+**/.env
+*.log
+.pnu-db/
+mnt/
+pnu-projeto.zip
+
+# Editores / SO
+.DS_Store
+.vscode/
+.idea/
