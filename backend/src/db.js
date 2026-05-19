@@ -1,48 +1,44 @@
-// Conexão com banco de dados (PGlite - WASM PostgreSQL)
 const { PGlite } = require('@electric-sql/pglite');
 const path = require('path');
 const fs = require('fs');
+const bcrypt = require('bcryptjs');
 
-const dbPath = path.join(__dirname, '..', '.pnu-db');
-const db = new PGlite(dbPath);
-let initialized = false;
+const isProd = process.env.NODE_ENV === 'production';
 
-async function ensureInitialized() {
-  if (initialized) return;
+const db = isProd
+  ? new PGlite()
+  : new PGlite(path.join(__dirname, '..', '.pnu-db'));
+
+const readyPromise = (async () => {
   try {
     await db.query('SELECT 1 FROM profissional LIMIT 1');
-  } catch (err) {
-    console.log('[db] Inicializando banco de dados com PGlite (rodando schema e seed)...');
-    const schemaPath = path.join(__dirname, '../../db/schema.sql');
-    const seedPath = path.join(__dirname, '../../db/seed.sql');
-    
-    if (fs.existsSync(schemaPath) && fs.existsSync(seedPath)) {
-      const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-      const seedSql = fs.readFileSync(seedPath, 'utf8');
-      await db.exec(schemaSql);
-      await db.exec(seedSql);
-      console.log('[db] Banco de dados inicializado com sucesso!');
-    } else {
-      console.warn('[db] Arquivos schema.sql e/ou seed.sql não encontrados.');
-    }
+    console.log('[db] Banco já inicializado (modo dev com arquivo).');
+    return;
+  } catch {
+    // Banco vazio — inicializa com schema + seed
   }
-  initialized = true;
-}
+  console.log('[db] Inicializando banco de dados...');
+  const schemaPath = path.join(__dirname, '../../db/schema.sql');
+  const seedPath   = path.join(__dirname, '../../db/seed.sql');
+  if (!fs.existsSync(schemaPath) || !fs.existsSync(seedPath)) {
+    throw new Error('[db] schema.sql ou seed.sql não encontrado em db/');
+  }
+  await db.exec(fs.readFileSync(schemaPath, 'utf8'));
+  await db.exec(fs.readFileSync(seedPath,   'utf8'));
+  const senha = process.env.DEV_PASSWORD || 'pnu123';
+  const hash  = await bcrypt.hash(senha, 10);
+  await db.query('UPDATE profissional SET senha_hash = $1', [hash]);
+  console.log(`[db] Banco pronto. Usuários de teste com senha "${senha}".`);
+})();
 
-/**
- * Executa uma query parametrizada e retorna as linhas resultantes.
- */
 async function query(text, params) {
-  await ensureInitialized();
+  await readyPromise;
   const result = await db.query(text, params);
   return result.rows;
 }
 
-/**
- * Encerra o pool graciosamente.
- */
 async function closePool() {
   await db.close();
 }
 
-module.exports = { pool: db, query, closePool };
+module.exports = { pool: db, query, closePool, readyPromise };
